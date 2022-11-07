@@ -1,0 +1,340 @@
+## Load the libraries
+
+To run RSelenium, the Java Development Kit (JDK) must be installed first
+
+-   [Installation Tutorial for Windows](https://www.youtube.com/watch?v=IJ-PJbvJBGs&t=3s&ab_channel=ProgrammingKnowledge)
+
+-   [Installation Tutorial for MacOS](https://www.youtube.com/watch?v=pxi3iIy4F5A&ab_channel=ProgrammingKnowledge)
+
+```{r}
+library(tidyverse)
+library(RSelenium)
+```
+
+## Create Selenium Driver object
+
+here's how to run it in Chrome
+
+1.  Determine Chrome version by typing [**chrome://version**](chrome://version){.uri} in Chrome address bar
+
+2.  Take note of the digits before the first period (either 2 or 3 digits depending on version)
+
+3.  run binman::list_versions("chromedriver")
+
+4.  Find the version that has the same matching first numbers (in my case, my first digits are 107)
+
+5.  Run the following code. Change the chromever parameter to what matches your version
+
+```{r}
+rs_driver_object <- rsDriver(browser = "chrome", chromever = "107.0.5304.62")
+```
+
+You can also run this via firefox (which is simpler)
+
+code: ***rs_driver_object \<- rsDriver(browser = "firefox")***
+
+## Access the client object
+
+```{r}
+remDr <- rs_driver_object$client
+```
+
+## Start the browser
+
+```{r}
+remDr$open()
+```
+
+## Create an empty data frame to append the data to
+
+```{r}
+all_reviews <- data.frame(Professor_ID = NA,
+                          Professor_Name = NA,
+                          University = NA,
+                          Department = NA,
+                          Quality = NA,
+                          Difficulty = NA,
+                          Emotion = NA, 
+                          Class_Name = NA, 
+                          Comment = NA, Thumbs_Up = NA,
+                          Thumbs_Down = NA,
+                          Review_Date = NA)
+```
+
+## Navigate to the list of the professors
+
+```{r}
+remDr$navigate("https://www.ratemyprofessors.com/search/teachers?query=*&sid=1452")
+```
+
+## Click on the Close button
+
+```{r}
+remDr$findElement(using = "xpath", "//div[starts-with(@class, 'FullPageModal__')]//button")$clickElement()
+```
+
+## Close the ad
+
+```{r}
+remDr$findElement(using = "xpath", "//a[@id='bx-close-inside-1177612']")$clickElement()
+```
+
+## Navigate to a professor's rating
+
+```{r}
+remDr$navigate("https://www.ratemyprofessors.com/professor?tid=9310")
+```
+
+## Click the "Load More Ratings" button to show all reviews
+
+```{r}
+# find number of ratings 
+num_of_ratings <- remDr$findElement(using = 'xpath', "//a[@href='#ratingsList']")$getElementText() %>% 
+  unlist() %>% 
+  str_extract("[:digit:]+") %>% 
+  as.numeric()
+
+# determine how many times to click the "Load More Ratings" button
+num_of_iterations <- ceiling( (num_of_ratings - 20) / 10)
+
+if (num_of_iterations > 1) { 
+  for (i in 1:num_of_iterations) {
+    # click to load more ratings
+    load_more <- remDr$findElement(using = "xpath", "//button[text()='Load More Ratings']")
+    y_position <- load_more$getElementLocation()$y - 100 # determine y position of element - 100
+    remDr$executeScript(sprintf("window.scrollTo(0, %f)", y_position)) # scroll to the element
+    load_more$clickElement() # click the element
+    Sys.sleep(1.5) # pause code for one and half seconds
+  }
+}
+```
+
+## Extract Professor ID, Name, Department, & University
+
+```{r}
+# get teacher ID 
+professor_id <- remDr$getCurrentUrl() %>% 
+  unlist() %>% 
+  str_extract("[:digit:]+$")
+
+# find teacher name 
+professor_name <- remDr$findElement(using = "xpath", "//div[starts-with(@class, 'NameTitle__Name')]")$getElementText() %>%
+  unlist()
+
+# department 
+department <- remDr$findElement(using = "xpath", "//div[starts-with(@class, 'NameTitle__Title')]//span//b")$getElementText() %>% 
+  unlist()
+
+# university 
+university <- remDr$findElement(using = "xpath", "//div[starts-with(@class, 'NameTitle__Title')]//a")$getElementText() %>%
+  unlist()
+```
+
+## Locate the rating body using xpath
+
+![[Credit: Tech Altum Tutorial](https://tutorial.techaltum.com/htmlTags.html)](https://tutorial.techaltum.com/images/element.png){width="749"}
+
+![[Credit: Guru99](https://www.guru99.com/xpath-selenium.html)](https://www.guru99.com/images/3-2016/032816_0758_XPathinSele1.png){width="750"}
+
+To learn more about how xpath works, you can refer to my [in-depth tutorial on RSelenium](https://www.youtube.com/watch?v=U1BrIPmhx10&t=567s&ab_channel=SamerHijjazi) and the [W3Schools](https://www.w3schools.com/xml/xpath_intro.asp) page.
+
+```{r}
+rating_body <- remDr$findElements(using = 'xpath', "//div[starts-with(@class, 'Rating__RatingBody')]")
+```
+
+## Collect review function
+
+```{r}
+collect_review <- function(rating) { 
+
+  quality <- rating$findChildElement(using = "xpath", "(.//div[starts-with(@class, 'CardNumRating')])[3]")$getElementText() %>% 
+    unlist() %>% 
+    as.numeric()
+  
+  difficulty <- rating$findChildElement(using = "xpath", "(.//div[starts-with(@class, 'CardNumRating')])[6]")$getElementText() %>%
+    unlist() %>%
+    as.numeric()
+  
+  emotion <- rating$findChildElement(using = "xpath", "(.//div[starts-with(@class, 'EmotionLabel')])[2]")$getElementText() %>%
+    unlist()
+  
+  class_name <- rating$findChildElement(using = "xpath", "(.//div[starts-with(@class,'RatingHeader__StyledClass')])[2]")$getElementText() %>% 
+    unlist()
+  
+  comment <- rating$findChildElement(using = "xpath", ".//div[starts-with(@class, 'Comments__StyledComments')]")$getElementText() %>% 
+    unlist()
+  
+  thumbs_up <- rating$findChildElement(using = "xpath", "(.//div[starts-with(@class, 'Thumbs__HelpTotal')])[1]")$getElementText() %>% 
+    unlist() %>% 
+    as.numeric()
+  
+  thumbs_down <- rating$findChildElement(using = "xpath", "(.//div[starts-with(@class, 'Thumbs__HelpTotal')])[2]")$getElementText() %>% 
+    unlist() %>% 
+    as.numeric()
+  
+  review_date <- rating$findChildElement(using = "xpath", "(.//div[starts-with(@class, 'TimeStamp')])[2]")$getElementText() %>% 
+    unlist()
+  
+  return(list(Professor_ID = professor_id,
+              Professor_Name = professor_name, 
+              University = university, 
+              Department = department,
+              Quality = quality, 
+              Difficulty = difficulty, 
+              Emotion = emotion,
+              Class_Name = class_name, 
+              Comment = comment, 
+              Thumbs_Up = thumbs_up,
+              Thumbs_Down = thumbs_down, 
+              Review_Date = review_date)) 
+}
+```
+
+## Apply function to all reviews and append to *all_reviews* dataframe
+
+```{r}
+# run the function on all reviews 
+reviews <- rating_body %>% map_dfr(~collect_review(.))
+
+# append the reviews to the main dataframe 
+all_reviews <- bind_rows(all_reviews, reviews)
+```
+
+# **Running the entire program**
+
+## Loop to click on the "Show More" button
+
+```{r}
+# initialize empty dataframe
+all_reviews <- data.frame(Professor_ID = NA,
+                          Professor_Name = NA,
+                          University = NA,
+                          Department = NA,
+                          Quality = NA,
+                          Difficulty = NA,
+                          Emotion = NA, 
+                          Class_Name = NA, 
+                          Comment = NA, Thumbs_Up = NA,
+                          Thumbs_Down = NA,
+                          Review_Date = NA)
+
+# return to main page
+remDr$navigate("https://www.ratemyprofessors.com/search/teachers?query=*&sid=1452")
+```
+
+## Loop to click on "show more" professors
+
+```{r}
+for (t in 1:10) {
+  show_more <- remDr$findElement(using = "xpath", "//button[text()='Show More']")
+  y_position <- show_more$getElementLocation()$y - 100
+  remDr$executeScript(sprintf("window.scrollTo(0, %f)", y_position))  
+  show_more$clickElement()
+  Sys.sleep(1.5) 
+}
+```
+
+## Locate teacher card
+
+```{r}
+# locates all teacher cards displayed
+teacher_cards <- remDr$findElements(using = "xpath", "//a[starts-with(@class, 'TeacherCard__StyledTeacherCard')]")
+
+# extracts urls from teacher cards. We will need these URLs to loop over the data.
+teacher_urls <- map(teacher_cards, ~.$getElementAttribute("href") %>% unlist())
+```
+
+## The main loop which loops through the professors and collects all their reviews
+
+```{r}
+for (t_url in teacher_urls) {
+
+  # navigate to professor's page
+  remDr$navigate(t_url)
+  
+  # a check for skipping over professors with no ratings
+  rating_check <- remDr$findElement(using = "xpath", "//div[starts-with(@class,'RatingValue__NumRatings')]")$getElementText() %>% 
+    unlist()
+  if (rating_check == "No ratings yet. Add a rating.") { next }
+  
+  #get teacher ID 
+  professor_id <- remDr$getCurrentUrl() %>% 
+    unlist() %>% 
+    str_extract("[:digit:]+$")
+  
+  # find teacher name 
+  professor_name <- remDr$findElement(using = "xpath", "//div[starts-with(@class, 'NameTitle__Name')]")$getElementText() %>% 
+    unlist()
+  
+  # department 
+  department <- remDr$findElement(using = "xpath", "//div[starts-with(@class, 'NameTitle__Title')]//span//b")$getElementText() %>% 
+    unlist()
+  
+  # university 
+  university <- remDr$findElement(using = "xpath", "//div[starts-with(@class, 'NameTitle__Title')]//a")$getElementText() %>%
+    unlist()
+  
+  # find number of ratings 
+  num_of_ratings <- remDr$findElement(using = 'xpath', "//a[@href='#ratingsList']")$getElementText() %>% 
+    unlist() %>% 
+    str_extract("[:digit:]+") %>% 
+    as.numeric()
+  
+  # determine how many times to click the "Load More Ratings" button
+  num_of_iterations <- ceiling((num_of_ratings - 20) / 10)
+  
+  if (num_of_iterations > 1) { 
+    for (i in 1:num_of_iterations) {
+      # click to load more ratings
+      load_more <- remDr$findElement(using = "xpath", "//button[text()='Load More Ratings']")
+      
+      y_position <- load_more$getElementLocation()$y - 100 # determine y position of element - 100
+      remDr$executeScript(sprintf("window.scrollTo(0, %f)", y_position)) # scroll to the element
+      load_more$clickElement() # click the element
+      Sys.sleep(1) # pause code for one second
+    }
+  }
+  
+  # locate the rating body 
+  rating_body <- remDr$findElements(using = 'xpath', "//div[starts-with( @class, 'Rating__RatingBody')]")
+  
+  # run the function on all reviews 
+  reviews <- rating_body %>% map_dfr(~collect_review(.))
+  
+  # append the reviews to the main dataframe 
+  all_reviews <- bind_rows(all_reviews, reviews)
+  
+  # five second pause before it moves to the next professor 
+  Sys.sleep(5)
+}
+```
+
+## View the data
+
+```{r}
+all_reviews %>% as_tibble()
+```
+
+## Remove first row of NAs
+
+```{r}
+all_reviews <- slice(all_reviews, -1)
+```
+
+## Cleaning the emotion column
+
+```{r}
+all_reviews$Emotion <- all_reviews$Emotion %>% str_extract("[A-Z]+")
+```
+
+## Writing the dataset to a file
+
+```{r}
+write_csv(all_reviews, "Rate My Professors Reviews.csv")
+```
+
+## Terminate the selenium server
+
+```{r}
+system("taskkill /im java.exe /f")
+```
